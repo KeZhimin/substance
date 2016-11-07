@@ -67,10 +67,18 @@ class Editing {
   _transaction(fn) {
     let selection = this._getSelection()
     let surface = this._getSurface()
+    let surfaceId = surface.id
+    let containerId = surface.getContainerId()
     this.editorSession.transaction((tx) => {
       tx.selection = selection
       tx.surfaceId = surface.id
       fn(tx)
+      if (!tx.selection.surfaceId) {
+        tx.selection.surfaceId = surfaceId
+      }
+      if (containerId && ! tx.selection.containerId) {
+        tx.selection.containerId = containerId
+      }
       return {
         selection: tx.selection
       }
@@ -126,12 +134,13 @@ class Editing {
       // TODO: are we sure that this is the default implementation? or is it specific to text nodes?
       let offset = sel.start.offset
       let text = tx.get(path)
-      if (offset === 0 && direction === 'left') {
+      if ( ((offset === 0 && direction === 'left') || (offset === text.length && direction === 'right')) && sel.containerId) {
         // need to merge
-        console.log('TODO: merge')
-      } else if (offset === text.length && direction === 'right') {
-        // need to merge
-        console.log('TODO: merge')
+        let container = tx.get(sel.containerId)
+        let nodePos = container.getPosition(node.id)
+        let previous = nodePos > 0 ? container.getNodeAt(nodePos-1) : null
+        let next = nodePos < container.getLength()-1 ? container.getNodeAt(nodePos+1) : null
+        nodeEditing.merge(tx, node, sel.start, container, direction, previous, next)
       } else {
         let start = offset
         if (direction === 'left') start = start-1
@@ -191,7 +200,8 @@ class Editing {
       }
     } else if (sel.isCustomSelection()) {
       // TODO: what to do with custom selections?
-    } else if (sel.isCollapsed() || sel.isPropertySelection()) {
+    }
+    else if (sel.isCollapsed() || sel.isPropertySelection()) {
       let containerId = sel.containerId
       if (!sel.isCollapsed()) {
         // delete the selection
@@ -200,7 +210,15 @@ class Editing {
       }
       // then break the node
       if (containerId) {
-        console.log('Break node...')
+        let container = tx.get(containerId)
+        let nodeId = sel.startPath[0]
+        let node = tx.get(nodeId)
+        let nodeEditing = this._getNodeEditing(node)
+        if (nodeEditing) {
+          nodeEditing.break(tx, node, sel.start, container)
+        } else {
+          console.warn('No editing behavior defined for node type', node.type)
+        }
       } else {
         // TODO: do we still want a soft-break thingie here? i.e. insert a <br>
       }
@@ -208,6 +226,7 @@ class Editing {
       // delete the selection
       this._deleteContainerSelection(tx, sel)
       // but don't merge, simply set the selection at the beginning of the second node
+      console.log('TODO: set the selection at the beginning of next node')
     }
   }
 
